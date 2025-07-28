@@ -6,7 +6,9 @@ from typing import List
 import yt_dlp
 from fastapi import HTTPException
 import validators
+from yt_dlp import DownloadError
 
+from app.exception import VideoNotFoundError, ConversionError, SetupError
 from app.schema import VideoResponse, Resolution
 from app.utils import run_in_threadpool, is_youtube_url
 
@@ -23,40 +25,41 @@ class YoutubeService:
             'quiet': True,
             'no_warnings': True,
         }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            return info
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                return info
+        except DownloadError as e:
+            raise VideoNotFoundError("Video not found or access is denied.")
+        except Exception as e:
+            raise ConversionError("An unexpected error occurred with the video library.")
 
     async def get_video_info(self, url: str) -> VideoResponse:
         if not is_youtube_url(url):
-            raise HTTPException(status_code=400, detail="Invalid URL format.")
-        try:
-            formatted_url = self._format_url(url)
-            video_info = await run_in_threadpool(self._get_video_info_sync, formatted_url)
+            raise VideoNotFoundError("Invalid URL format.")
+        formatted_url = self._format_url(url)
+        video_info = await run_in_threadpool(self._get_video_info_sync, formatted_url)
 
-            resolutions: List[Resolution] = []
-            for f in video_info.get('formats', []):
-                if f.get('vcodec') != 'none' and f.get('ext') == 'mp4':
-                    filesize_mb = f.get('filesize') or f.get('filesize_approx')
-                    if filesize_mb:
-                        filesize_mb = round(filesize_mb / 1024 / 1024, 2)
-                        resolution = Resolution(
-                            id=f.get('format_id'),
-                            resolution=f.get('resolution', 'audio-only'),
-                            size=filesize_mb
-                        )
-                        resolutions.append(resolution)
+        resolutions: List[Resolution] = []
+        for f in video_info.get('formats', []):
+            if f.get('vcodec') != 'none' and f.get('ext') == 'mp4':
+                filesize_mb = f.get('filesize') or f.get('filesize_approx')
+                if filesize_mb:
+                    filesize_mb = round(filesize_mb / 1024 / 1024, 2)
+                    resolution = Resolution(
+                        id=f.get('format_id'),
+                        resolution=f.get('resolution', 'audio-only'),
+                        size=filesize_mb
+                    )
+                    resolutions.append(resolution)
 
-            response = VideoResponse(
-                title=video_info.get('title'),
-                thumbnail=video_info.get('thumbnail'),
-                duration=video_info.get('duration_string'),
-                resolutions=resolutions
-            )
+        return VideoResponse(
+            title=video_info.get('title'),
+            thumbnail=video_info.get('thumbnail'),
+            duration=video_info.get('duration_string'),
+            resolutions=resolutions
+        )
 
-            return response
-        except Exception as e:
-            raise Exception(f"Failed to get video info: {e}")
 
     def _convert_mp3_sync(self, url: str):
         # ffmpeg_location = r"D:\ffmpeg\bin"
@@ -90,48 +93,50 @@ class YoutubeService:
                 raise Exception(f"yt-dlp failed: {error_message}")
 
             return stdout
+        except FileNotFoundError:
+            raise SetupError("Server is not configured correctly to process videos.")
         except subprocess.TimeoutExpired:
             process.kill()
-            print("ERROR: Conversion process timed out.")
-            raise Exception("Conversion process timed out after 5 minutes.")
-        except FileNotFoundError:
-            raise Exception(
-                "yt-dlp or ffmpeg not found. Please ensure they are in the system's PATH or specified correctly.")
+            raise ConversionError("The video conversion process took too long and was terminated.")
+        except Exception as e:
+            raise ConversionError("An unexpected error occurred during video conversion.")
 
     async def get_mp3_stream_buffer(self, url: str) -> io.BytesIO:
+        if not is_youtube_url(url):
+            raise VideoNotFoundError("Invalid URL format.")
         mp3_bytes = await run_in_threadpool(self._convert_mp3_sync, url)
         return io.BytesIO(mp3_bytes)
 
-    async def stream_audio_mp3(self, url: str):
-        if not is_youtube_url(url):
-            raise HTTPException(status_code=400, detail="Invalid URL format.")
-        formatted_url = self._format_url(url)
-        command = [
-            "yt-dlp",
-            "-f", "bestaudio/best",
-            "--extract-audio",
-            "--audio-format", "mp3",
-            "--audio-quality", "192K",
-            formatted_url,
-            "-o", "-"
-        ]
-
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-
-        while True:
-            chunk = await process.stdout.read(8192)
-            if not chunk:
-                break
-            yield chunk
-
-        await process.wait()
-        if process.returncode != 0:
-            error = await process.stderr.read()
-            raise Exception(f"Failed to process and stream MP3. Error: {error.decode()}")
+    # async def stream_audio_mp3(self, url: str):
+    #     if not is_youtube_url(url):
+    #         raise VideoNotFoundError("Invalid URL format.")
+    #     formatted_url = self._format_url(url)
+    #     command = [
+    #         "yt-dlp",
+    #         "-f", "bestaudio/best",
+    #         "--extract-audio",
+    #         "--audio-format", "mp3",
+    #         "--audio-quality", "192K",
+    #         formatted_url,
+    #         "-o", "-"
+    #     ]
+    #
+    #     process = await asyncio.create_subprocess_exec(
+    #         *command,
+    #         stdout=asyncio.subprocess.PIPE,
+    #         stderr=asyncio.subprocess.PIPE
+    #     )
+    #
+    #     while True:
+    #         chunk = await process.stdout.read(8192)
+    #         if not chunk:
+    #             break
+    #         yield chunk
+    #
+    #     await process.wait()
+    #     if process.returncode != 0:
+    #         error = await process.stderr.read()
+    #         raise Exception(f"Failed to process and stream MP3. Error: {error.decode()}")
 
 
 def get_youtube_service():
