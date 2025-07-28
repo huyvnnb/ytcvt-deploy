@@ -26,17 +26,11 @@ class SetupError(ServiceError):
     pass
 
 
-# Handler cho các lỗi nghiệp vụ tùy chỉnh của chúng ta
 async def service_error_handler(request: Request, exc: ServiceError):
-    """
-    Bắt tất cả các lỗi kế thừa từ ServiceError và chuyển thành
-    phản hồi JSON theo cấu trúc ModelResponse.
-    """
     status_code = 500
     error_code = "INTERNAL_SERVER_ERROR"
     message = "An internal server error occurred."
 
-    # Map các loại exception cụ thể với status code và error code tương ứng
     if isinstance(exc, VideoNotFoundError):
         status_code = 404
         error_code = "VIDEO_NOT_FOUND"
@@ -50,7 +44,6 @@ async def service_error_handler(request: Request, exc: ServiceError):
         error_code = "SERVER_CONFIGURATION_ERROR"
         message = str(exc)
 
-    # Tạo response theo cấu trúc đã định nghĩa
     error_response = ErrorResponse(code=error_code, message=message)
     response_content = ModelResponse(success=False, error=error_response).model_dump()
 
@@ -60,7 +53,6 @@ async def service_error_handler(request: Request, exc: ServiceError):
     )
 
 
-# Handler để ghi đè lỗi validation mặc định của FastAPI
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """
     Bắt lỗi RequestValidationError và định dạng lại theo cấu trúc ModelResponse.
