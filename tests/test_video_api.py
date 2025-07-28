@@ -1,4 +1,3 @@
-import requests
 from fastapi.testclient import TestClient
 from app.main import app
 
@@ -15,7 +14,7 @@ video_urls = [
 
 def test_get_video_info_multiple_urls():
     for url in video_urls:
-        response = requests.get("http://localhost:8000/tools/youtube/video-info", params={"url": url})
+        response = client.get("/tools/youtube/video-info", params={"url": url})
         assert response.status_code == 200
         json_data = response.json()
         assert json_data["success"] is True
@@ -27,20 +26,20 @@ def test_get_video_info_multiple_urls():
 
 def test_get_video_info_invalid_url():
     url = "https://www.youtube.com/watch?v=invalid1234"
-    response = requests.get("http://localhost:8000/tools/youtube/video-info", params={"url": url})
+    response = client.get("/tools/youtube/video-info", params={"url": url})
     assert response.status_code in (400, 404, 500)
     json_data = response.json()
     assert json_data["success"] is False
 
 
 def test_get_video_info_missing_url():
-    response = requests.get("http://localhost:8000/tools/youtube/video-info")
+    response = client.get("/tools/youtube/video-info")
     assert response.status_code == 422 or response.status_code == 400
 
 
 def test_get_video_info_structure():
     url = "https://www.youtube.com/watch?v=KH9vHrj475k"
-    response = requests.get("http://localhost:8000/tools/youtube/video-info", params={"url": url})
+    response = client.get("/tools/youtube/video-info", params={"url": url})
     data = response.json()["data"]
     assert "title" in data
     assert "thumbnail" in data
