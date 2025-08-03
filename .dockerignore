@@ -1,4 +1,19 @@
+# Git
+.git
+.gitignore
+
+# Python
 __pycache__/
 *.pyc
-.git
-.venv
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# IDE/Editor
+.vscode/
+.idea/
